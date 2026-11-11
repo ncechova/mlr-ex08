@@ -452,7 +452,7 @@ async function loadModel() {
   scratchCtx = scratch.getContext("2d", { willReadFrequently: true });
   scratchCtx.imageSmoothingQuality = "high";
 
-  setBanner("Downloading the model (6 MB) and the wasm runtime (15 MB)…");
+  setBanner("Downloading the model (5.7 MB) and the wasm runtime (3.2 MB)…");
   await loadRuntime();
   const modelData = await (await fetch(MODEL_URL)).arrayBuffer();
   session = await ort.InferenceSession.create(modelData, { executionProviders: ["wasm"] });

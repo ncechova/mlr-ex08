@@ -89,8 +89,9 @@ The same contract was verified against an independent reference implementation
   Pages provides. (`http://localhost` also works for development.)
 * **WebAssembly SIMD** — the runtime build needs it: iOS/iPadOS 16.4+, Safari 16.4+,
   Chrome/Edge 91+, Firefox 90+.
-* First load downloads ~15 MB of wasm runtime plus the 6 MB model; after that the
-  browser cache serves both.
+* First load downloads 3.2 MB of wasm runtime (3,196,527 B of wasm plus a 37 KB loader)
+  and 5.7 MB of model — 8.9 MB in total, all measured in the browser's network log. After
+  that the browser cache serves both.
 
 iPhone notes: the video element uses `playsinline` and the camera is requested with
 `facingMode: ideal "environment"`, falling back to plainer constraints on devices that do
