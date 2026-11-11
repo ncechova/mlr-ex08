@@ -55,8 +55,8 @@ comparison. Measured on the reference run:
 |---|---|---|---|
 | apple | 5.39×10⁻⁸ | 5.394148×10⁻⁸ | ≈ 1×10⁻¹² |
 | cherry | 99.9964 % | 99.996448 % | ≈ 8×10⁻⁸ |
-| chestnut | 0.0035 % | 3.50894×10⁻⁵ | ≈ 1×10⁻⁹ |
-| maple | 4.61×10⁻⁷ | 4.611038×10⁻⁷ | ≈ 1×10⁻¹² |
+| chestnut | 0.0035 % | 3.50894×10⁻⁵ | ≈ 9.6×10⁻¹⁰ |
+| maple | 4.61×10⁻⁷ | 4.611038×10⁻⁷ | ≈ 1.5×10⁻¹¹ |
 
 Largest per-class deviation **8.1×10⁻⁸**, i.e. agreement to about seven decimal places;
 the check passes when the top class matches and every deviation stays under 1×10⁻³. The
@@ -101,6 +101,7 @@ the page never sends the URL anywhere. It encodes the canonical Pages URL
 | `check_image.jpg` | verification image (96×96) |
 | `check_expected.json` | reference probabilities for that image |
 | `favicon.svg` | icon |
+| `.nojekyll` | tells GitHub Pages to serve the files as they are (no Jekyll step) |
 
 ## Running it locally
 
