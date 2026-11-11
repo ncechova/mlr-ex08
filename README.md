@@ -6,6 +6,22 @@ Point an iPhone (or any phone/laptop) rear camera at a leaf and the page classif
 live, in the browser. Nothing is uploaded — the model runs locally on the device via
 ONNX Runtime Web (WebAssembly).
 
+<table>
+  <tr>
+    <td>
+      <a href="https://ncechova.github.io/mlr-ex08/">
+        <img src="qr.svg" width="222" height="222"
+             alt="QR code that opens https://ncechova.github.io/mlr-ex08/ on a phone">
+      </a>
+    </td>
+    <td>
+      <strong><a href="https://ncechova.github.io/mlr-ex08/">ncechova.github.io/mlr-ex08</a></strong><br>
+      Scan with the phone's camera app, or follow the link.<br>
+      The page draws this same code at its own foot.
+    </td>
+  </tr>
+</table>
+
 | | |
 |---|---|
 | Live page | <https://ncechova.github.io/mlr-ex08/> |
@@ -90,12 +106,18 @@ unmodified in this repository — see its header comment). No QR-web-service is 
 the page never sends the URL anywhere. It encodes the canonical Pages URL
 `https://ncechova.github.io/mlr-ex08/` and sits next to the same URL as a clickable link.
 
+`qr.svg` at the top of this README is that same symbol, exported from what the deployed
+page renders and committed as a static file, because GitHub renders README markup without
+running any JavaScript. It is module-for-module identical to the on-page code — same payload,
+same 29×29 modules, same 4-module quiet zone.
+
 ## Files
 
 | file | role |
 |---|---|
 | `index.html` | the whole app: UI, preprocessing, inference, self-check, QR |
 | `qrcode.js` | vendored QR encoder (unmodified upstream, MIT) |
+| `qr.svg` | the same QR code as a static file, for this README |
 | `leaf_model.onnx` | the trained model |
 | `model_info.json` | class names, input size, mean/std — the preprocessing contract |
 | `check_image.jpg` | verification image (96×96) |
