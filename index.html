@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#0d0d0d" />
+<title>Leaf classifier · live camera</title>
+<link rel="icon" href="favicon.svg" />
+<!--
+  Live leaf classification in the browser. One file, plain JavaScript, no build step.
+
+  Runtime: onnxruntime-web 1.31.1 (wasm/EP bundle) from the jsDelivr CDN.
+  Model:   leaf_model.onnx, contract taken from model_info.json:
+             central square of the frame -> resize to input_size -> RGB /255
+             -> per-channel (x - mean) / std -> NCHW float32 [1,3,size,size]
+           The model's single output is `logits`, so softmax is applied here.
+
+  Camera access needs a secure context, which is why this page is served over
+  HTTPS by GitHub Pages. If getUserMedia is unavailable (or is denied), the
+  photo-picker path below uses the exact same preprocessing and inference code.
+-->
+<style>
+  :root {
+    color-scheme: dark;
+    /* surfaces & ink */
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232321;
+    --hairline: #2c2c2a;
+    --ring: rgba(255, 255, 255, 0.10);
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --ink-3: #a8a69f;
+    /* one measure (probability) -> one hue; identity comes from the row labels */
+    --accent: #3987e5;
+    --accent-ink: #0b0b0b;
+    --track: #1f2b3a;            /* recessive rail: 1.2:1 on the surface, fill clears it at 3.9:1 */
+    --good: #0ca30c;
+    --bad: #e66767;
+    --radius: 14px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 0 max(16px, env(safe-area-inset-left)) calc(40px + env(safe-area-inset-bottom));
+  }
+
+  main { width: min(100%, 560px); margin: 0 auto; }
+
+  header.app { padding: calc(18px + env(safe-area-inset-top)) 0 12px; }
+  header.app h1 { margin: 0; font-size: 21px; font-weight: 650; letter-spacing: -0.01em; }
+  header.app p { margin: 4px 0 0; color: var(--ink-3); font-size: 13px; }
+
+  section, .card {
+    background: var(--surface);
+    border: 1px solid var(--ring);
+    border-radius: var(--radius);
+  }
+
+  /* ---- viewfinder ------------------------------------------------------ */
+  .viewfinder {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    background: #000;
+  }
+  /* object-fit:cover on a square box shows exactly the centre square, i.e.
+     what the model actually receives. */
+  .viewfinder video {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    background: #000;
+  }
+  .vf-idle {
+    position: absolute; inset: 0;
+    display: grid; place-content: center; gap: 6px; text-align: center;
+    color: var(--ink-3); font-size: 14px; padding: 24px;
+  }
+  .vf-idle svg { margin: 0 auto; opacity: 0.6; }
+  .chips {
+    position: absolute; left: 10px; right: 10px;
+    display: flex; gap: 6px; justify-content: space-between; pointer-events: none;
+  }
+  .chips.top { top: 10px; }
+  .chip {
+    background: rgba(13, 13, 13, 0.72);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    border: 1px solid var(--ring);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px; color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .vf-msg {
+    position: absolute; left: 10px; right: 10px; bottom: 10px;
+    background: rgba(13, 13, 13, 0.86);
+    border: 1px solid var(--ring);
+    border-left: 3px solid var(--bad);
+    border-radius: 10px;
+    padding: 9px 11px; font-size: 13px; color: var(--ink);
+  }
+  .vf-msg[hidden] { display: none; }
+
+  /* ---- readout --------------------------------------------------------- */
+  .readout { padding: 14px 16px 4px; }
+  .hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hero .cls { font-size: clamp(28px, 8vw, 40px); font-weight: 650; letter-spacing: -0.02em; }
+  .hero .conf { font-size: clamp(17px, 4.5vw, 22px); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .src { color: var(--ink-3); font-size: 12px; margin: 2px 0 0; }
+
+  ul.probs { list-style: none; margin: 12px 0 0; padding: 0 16px 16px; }
+  ul.probs li {
+    display: grid;
+    grid-template-columns: 78px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 0;
+  }
+  ul.probs .name { font-size: 14px; color: var(--ink-2); }
+  ul.probs li.top .name { color: var(--ink); font-weight: 600; }
+  /* thin mark, rounded data end, square at the baseline */
+  .bar { position: relative; height: 10px; }
+  .bar .track, .bar .fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .bar .track { right: 0; background: var(--track); }
+  .bar .fill {
+    width: 0;
+    background: var(--accent);
+    transition: width 120ms linear;
+  }
+  ul.probs .val {
+    font-size: 13px; color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    min-width: 8.5ch; text-align: right;
+  }
+  ul.probs li:not(.top) .val { color: var(--ink-3); }
+  @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+
+  /* ---- controls -------------------------------------------------------- */
+  .controls {
+    display: flex; gap: 10px; flex-wrap: wrap;
+    margin: 14px 0 0;
+  }
+  button {
+    font: inherit; font-weight: 600;
+    border-radius: 12px; border: 1px solid transparent;
+    padding: 12px 16px; min-height: 46px;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    flex: 1 1 auto;
+  }
+  button.primary { background: var(--accent); color: var(--accent-ink); }
+  button.secondary { background: var(--surface-2); color: var(--ink); border-color: var(--ring); }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: 0.55; cursor: progress; }
+  button:focus-visible, a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+  .hint { color: var(--ink-3); font-size: 12px; margin: 10px 2px 0; }
+
+  .photo { display: none; gap: 12px; align-items: center; padding: 12px 14px; margin-top: 12px; }
+  .photo.show { display: flex; }
+  .photo img { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; background: #000; }
+  .photo div { font-size: 13px; color: var(--ink-2); }
+
+  /* ---- self check ------------------------------------------------------ */
+  details.selfcheck { margin: 14px 0 0; padding: 0 16px; }
+  details.selfcheck summary {
+    padding: 13px 0; cursor: pointer; font-weight: 600; font-size: 14px;
+    list-style: none; display: flex; align-items: center; gap: 8px;
+  }
+  details.selfcheck summary::-webkit-details-marker { display: none; }
+  details.selfcheck summary::before { content: "▸"; color: var(--ink-3); }
+  details.selfcheck[open] summary::before { content: "▾"; }
+  .sc-state { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--ink-3); }
+  .sc-state.ok { color: var(--good); }
+  .sc-state.no { color: var(--bad); }
+  .sc-body { padding: 0 0 16px; border-top: 1px solid var(--hairline); }
+  .sc-body p { font-size: 13px; color: var(--ink-2); }
+  table.sc { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  table.sc th, table.sc td { text-align: right; padding: 5px 6px; font-variant-numeric: tabular-nums; }
+  table.sc th:first-child, table.sc td:first-child { text-align: left; }
+  table.sc thead th { color: var(--ink-3); font-weight: 500; border-bottom: 1px solid var(--hairline); }
+
+  /* ---- QR / share ------------------------------------------------------ */
+  .share { margin: 22px 0 0; padding: 16px; display: flex; gap: 16px; align-items: center; }
+  .share .qr-card {
+    background: #fff;            /* QR readers want dark modules on a light field */
+    border-radius: 10px; padding: 8px; line-height: 0; flex: 0 0 auto;
+  }
+  .share svg { display: block; width: 132px; height: 132px; }
+  .share h2 { margin: 0 0 4px; font-size: 15px; font-weight: 650; }
+  .share p { margin: 0; font-size: 12.5px; color: var(--ink-3); }
+  .share a.link {
+    display: inline-block; margin-top: 8px;
+    color: var(--accent); font-size: 13.5px; font-weight: 600;
+    text-decoration: underline; text-underline-offset: 3px;
+    overflow-wrap: anywhere;
+  }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header class="app">
+    <h1>Leaf classifier</h1>
+    <p id="modelMeta">loading model…</p>
+  </header>
+
+  <section class="viewfinder">
+    <video id="video" playsinline webkit-playsinline muted autoplay></video>
+    <div class="vf-idle" id="vfIdle">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.2a1.5 1.5 0 0 0 1.2-.6l.6-.8a1.5 1.5 0 0 1 1.2-.6h2.6a1.5 1.5 0 0 1 1.2.6l.6.8a1.5 1.5 0 0 0 1.2.6h1.2A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z" />
+        <circle cx="12" cy="12.5" r="3.2" />
+      </svg>
+      Rear camera, live
+    </div>
+    <div class="chips top">
+      <span class="chip" id="perfChip" hidden>—</span>
+      <span class="chip" id="srcChip" hidden>camera</span>
+    </div>
+    <p class="vf-msg" id="banner" hidden></p>
+  </section>
+
+  <section class="readout" aria-labelledby="probsHeading">
+    <div class="hero">
+      <span class="cls" id="topClass">—</span>
+      <span class="conf" id="topConf"></span>
+    </div>
+    <p class="src" id="probsHeading">Point the camera at a leaf. The centre square of the frame is what gets scored.</p>
+
+    <h2 class="sr-only">Class probabilities</h2>
+    <ul class="probs" id="probs"></ul>
+    <p class="sr-only" id="live" aria-live="polite"></p>
+  </section>
+
+  <div class="controls">
+    <button class="primary" id="btnCam" type="button">Start camera</button>
+    <button class="secondary" id="btnPhoto" type="button">Choose photo</button>
+    <input type="file" id="file" accept="image/*" aria-label="Choose a photo of a leaf" />
+  </div>
+  <p class="hint">No camera, or permission denied? Pick a photo instead — same model, same preprocessing.</p>
+
+  <section class="card photo" id="photoCard">
+    <img id="photoImg" alt="The leaf photo you selected" />
+    <div id="photoNote"></div>
+  </section>
+
+  <details class="selfcheck card" id="selfcheck">
+    <summary>Model self-check <span class="sc-state" id="scState">idle</span></summary>
+    <div class="sc-body">
+      <p id="scSummary">Runs <code>check_image.jpg</code> through this exact page — same crop, resize, normalisation and runtime — and compares the output with <code>check_expected.json</code>.</p>
+      <table class="sc" id="scTable" hidden>
+        <thead><tr><th scope="col">class</th><th scope="col">this page</th><th scope="col">expected</th><th scope="col">difference</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <button class="secondary" id="btnCheck" type="button" style="margin-top:12px">Run self-check</button>
+    </div>
+  </details>
+
+  <section class="card share">
+    <span class="qr-card" id="qr" role="img" aria-label="QR code that opens this page on a phone"></span>
+    <div>
+      <h2>Open on your phone</h2>
+      <p>Scan with the camera app. The code encodes this page's public URL:</p>
+      <a class="link" id="appLink" href="/mlr-ex08/"></a>
+    </div>
+  </section>
+</main>
+
+<!-- Vendored, unmodified: QR Code Generator for JavaScript, © 2009 Kazuhiko Arase,
+     MIT. Generates the QR matrix in this browser tab — no third-party QR service. -->
+<script src="qrcode.js"></script>
+<script type="module">
+/* ------------------------------------------------------------------ config */
+const APP_URL    = "https://ncechova.github.io/mlr-ex08/";   // canonical Pages URL
+const ORT_VERSION = "1.31.1";
+const ORT_DIST   = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
+const MODEL_URL  = "leaf_model.onnx";
+const INFO_URL   = "model_info.json";
+const CHECK_IMG  = "check_image.jpg";
+const CHECK_JSON = "check_expected.json";
+const TARGET_HZ  = 8;          // processing cap; frames are dropped while busy
+
+/* ------------------------------------------------------------------- DOM */
+const $ = (id) => document.getElementById(id);
+const video = $("video"), banner = $("banner"), perfChip = $("perfChip"), srcChip = $("srcChip");
+const topClass = $("topClass"), topConf = $("topConf"), probsList = $("probs");
+const live = $("live"), idle = $("vfIdle"), btnCam = $("btnCam"), btnPhoto = $("btnPhoto");
+const fileInput = $("file"), photoCard = $("photoCard"), photoImg = $("photoImg"), photoNote = $("photoNote");
+
+/* ------------------------------------------------------------  QR + link  */
+// Done first and independently of the model: the share block works even if the
+// runtime or the model fails to load.
+function renderQr(el, text) {
+  const qr = qrcode(0, "M");           // type 0 = auto-fit, M = medium error correction
+  qr.addData(text);
+  qr.make();
+  const n = qr.getModuleCount(), QUIET = 4, S = n + QUIET * 2;
+  let d = "";
+  for (let r = 0; r < n; r++)
+    for (let c = 0; c < n; c++)
+      if (qr.isDark(r, c)) d += `M${c + QUIET} ${r + QUIET}h1v1h-1z`;
+  el.innerHTML =
+    `<svg viewBox="0 0 ${S} ${S}" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">` +
+    `<rect width="${S}" height="${S}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+  el.setAttribute("aria-label", `QR code that opens ${text}`);
+  return Array.from({ length: n }, (_, r) =>
+    Array.from({ length: n }, (_, c) => (qr.isDark(r, c) ? 1 : 0)));
+}
+$("appLink").href = APP_URL;
+$("appLink").textContent = APP_URL.replace(/^https?:\/\//, "");
+const qrMatrix = renderQr($("qr"), APP_URL);
+
+/* ----------------------------------------------------------------- state */
+let ort = null, session = null, inputName = null, info = null;
+let stream = null, running = false, busy = false, rafId = 0, lastMs = 0;
+let rows = [];                       // { li, fill, val } per class
+const scratch = document.createElement("canvas");
+let scratchCtx = null;
+
+function setBanner(msg, kind = "err") {
+  if (!msg) { banner.hidden = true; return; }
+  banner.hidden = false;
+  banner.textContent = msg;
+  banner.style.borderLeftColor = kind === "ok" ? "var(--good)" : "var(--bad)";
+}
+
+/* --------------------------------------------------- build the class rows */
+function buildRows(classes) {
+  probsList.textContent = "";
+  rows = classes.map((name) => {
+    const li = document.createElement("li");
+    const label = document.createElement("span"); label.className = "name"; label.textContent = name;
+    const bar = document.createElement("span"); bar.className = "bar";
+    const track = document.createElement("span"); track.className = "track";
+    const fill = document.createElement("span"); fill.className = "fill";
+    bar.append(track, fill);
+    const val = document.createElement("span"); val.className = "val"; val.textContent = "–";
+    li.append(label, bar, val);
+    probsList.append(li);
+    return { name, li, fill, val };
+  });
+}
+
+/* ------------------------------------------------------------ formatting */
+const SUP = { "-": "⁻", 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹" };
+const trimZeros = (s) => s.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+
+// Percentages down to 0.01 %, extra digits near 100 % so a confident
+// prediction does not print as "100 %", and scientific notation below 0.1 % so
+// a 3.5e-5 tail stays readable instead of rounding to "0.00 %".
+function fmtProb(p) {
+  if (!isFinite(p) || p <= 0) return "0";
+  if (p >= 0.999) return `${trimZeros((p * 100).toFixed(4))} %`;
+  if (p >= 0.001) return `${trimZeros((p * 100).toFixed(2))} %`;
+  const [mant, exp] = p.toExponential(2).split("e");
+  const digits = String(Math.trunc(Number(exp))).split("").map((d) => SUP[d] ?? d).join("");
+  return `${trimZeros(mant)}×10${digits}`;
+}
+function fmtSigned(x) {
+  const a = Math.abs(x);
+  const s = a >= 1e-3 ? a.toFixed(4) : a.toExponential(2);
+  return (x < 0 ? "−" : "+") + s;
+}
+
+/* --------------------------------------------- preprocessing (the contract) */
+function preprocess(src, srcW, srcH) {
+  const size = info.input_size;
+  const s = Math.min(srcW, srcH);
+  const sx = Math.floor((srcW - s) / 2), sy = Math.floor((srcH - s) / 2);   // central square
+  scratchCtx.drawImage(src, sx, sy, s, s, 0, 0, size, size);                 // resize
+  const { data } = scratchCtx.getImageData(0, 0, size, size);               // RGB bytes
+  const n = size * size;
+  const t = new Float32Array(3 * n);
+  const [m0, m1, m2] = info.mean, [d0, d1, d2] = info.std;
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    t[i]       = (data[j]     / 255 - m0) / d0;      // plane 0 = R
+    t[n + i]   = (data[j + 1] / 255 - m1) / d1;      // plane 1 = G
+    t[2 * n + i] = (data[j + 2] / 255 - m2) / d2;    // plane 2 = B
+  }
+  return new ort.Tensor("float32", t, [1, 3, size, size]);
+}
+
+function softmax(logits) {
+  const a = Array.from(logits);
+  const m = Math.max(...a);
+  const ex = a.map((v) => Math.exp(v - m));
+  const sum = ex.reduce((s, v) => s + v, 0);
+  return ex.map((v) => v / sum);
+}
+
+async function classify(src, srcW, srcH) {
+  const tensor = preprocess(src, srcW, srcH);
+  const out = await session.run({ [inputName]: tensor });
+  return softmax(out[Object.keys(out)[0]].data);
+}
+
+/* -------------------------------------------------------------- rendering */
+function render(probs, sourceLabel) {
+  let best = 0;
+  probs.forEach((p, i) => { if (p > probs[best]) best = i; });
+  rows.forEach((row, i) => {
+    row.fill.style.width = `${(probs[i] * 100).toFixed(2)}%`;
+    row.val.textContent = fmtProb(probs[i]);
+    row.li.classList.toggle("top", i === best);
+  });
+  topClass.textContent = rows[best].name;
+  topConf.textContent = fmtProb(probs[best]);
+  srcChip.hidden = false;
+  srcChip.textContent = sourceLabel;
+  speak(`${rows[best].name}, ${Math.round(probs[best] * 100)} percent`, sourceLabel);
+}
+
+let lastSpoken = 0;
+function speak(text, sourceLabel) {            // throttled so VoiceOver keeps up
+  const now = performance.now();
+  if (now - lastSpoken < 2000) return;
+  lastSpoken = now;
+  live.textContent = `${sourceLabel === "camera" ? "Camera" : "Photo"}: ${text}.`;
+}
+
+/* -------------------------------------------------------- model bootstrap */
+async function loadRuntime() {
+  if (ort) return;
+  ort = await import(`${ORT_DIST}ort.wasm.bundle.min.mjs`);
+  ort.env.wasm.wasmPaths = ORT_DIST;
+  ort.env.wasm.numThreads = 1;   // Pages sends no COOP/COEP, so no SharedArrayBuffer
+}
+
+async function loadModel() {
+  info = await (await fetch(INFO_URL)).json();
+  buildRows(info.classes);
+  $("modelMeta").textContent =
+    `${info.classes.join(" · ")} — ${info.input_size}×${info.input_size} input, ONNX wasm`;
+  scratch.width = scratch.height = info.input_size;
+  scratchCtx = scratch.getContext("2d", { willReadFrequently: true });
+  scratchCtx.imageSmoothingQuality = "high";
+
+  setBanner("Downloading the model (6 MB) and the wasm runtime (15 MB)…");
+  await loadRuntime();
+  const modelData = await (await fetch(MODEL_URL)).arrayBuffer();
+  session = await ort.InferenceSession.create(modelData, { executionProviders: ["wasm"] });
+  inputName = session.inputNames[0];
+  setBanner("");
+  runSelfCheck();                              // verify against the shipped expectations
+}
+
+/* --------------------------------------------------------------- camera */
+async function openCamera() {
+  if (!window.isSecureContext) throw new Error("Camera needs HTTPS — open the page at its https:// URL.");
+  if (!navigator.mediaDevices?.getUserMedia)
+    throw new Error("This browser has no camera API. Use “Choose photo”.");
+  const attempts = [
+    { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false },
+    { video: { facingMode: "environment" } },
+    { video: true },
+  ];
+  let lastErr;
+  for (const c of attempts) {
+    try { return await navigator.mediaDevices.getUserMedia(c); }
+    catch (e) { lastErr = e; }
+  }
+  const name = lastErr?.name;
+  if (name === "NotAllowedError") throw new Error("Camera permission was denied. Allow it in Safari › Settings › Apps › Camera, or use “Choose photo”.");
+  if (name === "NotFoundError" || name === "OverconstrainedError") throw new Error("No camera found on this device. Use “Choose photo”.");
+  throw new Error(`Camera failed to start (${name || lastErr}). Use “Choose photo”.`);
+}
+
+async function startCamera() {
+  btnCam.disabled = true;
+  try {
+    await ensureModel();
+    stream = await openCamera();
+    video.srcObject = stream;
+    video.muted = true;
+    await video.play().catch(() => {});
+    if (!video.videoWidth) await new Promise((r) => video.addEventListener("loadedmetadata", r, { once: true }));
+    running = true;
+    idle.style.display = "none";
+    btnCam.disabled = false;
+    btnCam.textContent = "Stop camera";
+    perfChip.hidden = false;
+    setBanner("");
+    startLoop();
+  } catch (e) {
+    running = false;
+    btnCam.disabled = false;
+    btnCam.textContent = "Start camera";
+    setBanner(e.message || String(e));
+  }
+}
+
+function stopCamera() {
+  running = false;
+  cancelSchedule();
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  video.srcObject = null;
+  idle.style.display = "";
+  btnCam.textContent = "Start camera";
+  perfChip.hidden = true;
+}
+
+function schedule(fn) {
+  if ("requestVideoFrameCallback" in HTMLVideoElement.prototype) rafId = video.requestVideoFrameCallback(fn);
+  else rafId = setTimeout(() => fn(performance.now()), 1000 / TARGET_HZ);
+}
+function cancelSchedule() {
+  if (!rafId) return;
+  if ("requestVideoFrameCallback" in HTMLVideoElement.prototype) video.cancelVideoFrameCallback(rafId);
+  else clearTimeout(rafId);
+  rafId = 0;
+}
+
+// One generation per loop chain, so hiding and reshowing the tab can never
+// leave two chains running at once.
+let loopGen = 0;
+function startLoop() {
+  cancelSchedule();
+  step(++loopGen);
+}
+
+async function step(gen) {
+  if (!running || gen !== loopGen) return;
+  if (!busy && video.readyState >= 2) {
+    busy = true;
+    const t0 = performance.now();
+    try {
+      const p = await classify(video, video.videoWidth, video.videoHeight);
+      render(p, "camera");
+      const ms = performance.now() - t0;
+      lastMs = lastMs ? lastMs * 0.8 + ms * 0.2 : ms;
+      perfChip.textContent = `${(1000 / lastMs).toFixed(1)} fps · ${Math.round(lastMs)} ms`;
+    } catch (e) {
+      running = false;
+      setBanner(`Inference failed: ${e.message || e}`);
+    } finally {
+      busy = false;
+    }
+  }
+  if (running && gen === loopGen) schedule(() => step(gen));
+}
+
+/* ---------------------------------------------------------------- photo */
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("That file could not be decoded as an image."));
+    img.src = src;
+  });
+}
+
+async function onPickFile(file) {
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  btnPhoto.disabled = true;
+  try {
+    await ensureModel();
+    const img = await loadImage(url);
+    const p = await classify(img, img.naturalWidth, img.naturalHeight);
+    photoImg.src = url;
+    photoCard.classList.add("show");
+    photoNote.innerHTML =
+      `<strong>${img.naturalWidth}×${img.naturalHeight}</strong> · centre square scaled to ` +
+      `${info.input_size}×${info.input_size}<br>${file.name}`;
+    render(p, "photo");
+    setBanner("");
+  } catch (e) {
+    setBanner(e.message || String(e));
+    URL.revokeObjectURL(url);
+  } finally {
+    btnPhoto.disabled = false;
+  }
+}
+
+/* ----------------------------------------------------------- self-check */
+let modelReady = null;
+function ensureModel() { return (modelReady ||= loadModel().catch((e) => {
+  modelReady = null;
+  setBanner(`Could not load the model or runtime: ${e.message || e}. Reload to retry — the wasm runtime needs WebAssembly SIMD (iOS/iPadOS 16.4+, Safari 16.4+, Chrome 91+).`);
+  throw e;
+})) }
+
+const TOLERANCE = 1e-3;   // per-class |Δ|; covers browser-vs-reference JPEG decode and float32 order
+async function runSelfCheck() {
+  const state = $("scState"), table = $("scTable"), body = table.tBodies[0];
+  state.className = "sc-state"; state.textContent = "running…";
+  $("btnCheck").disabled = true;
+  try {
+    await ensureModel();
+    const [img, expected] = await Promise.all([
+      loadImage(CHECK_IMG),
+      (await fetch(CHECK_JSON)).json(),
+    ]);
+    const got = await classify(img, img.naturalWidth, img.naturalHeight);
+    body.textContent = "";
+    let maxDev = 0, best = 0;
+    got.forEach((p, i) => { if (p > got[best]) best = i; });
+    info.classes.forEach((cls, i) => {
+      const dev = got[i] - (expected[cls] ?? 0);
+      maxDev = Math.max(maxDev, Math.abs(dev));
+      const tr = document.createElement("tr");
+      for (const t of [cls, fmtProb(got[i]), fmtProb(expected[cls] ?? 0), fmtSigned(dev)]) {
+        const td = document.createElement("td"); td.textContent = t; tr.append(td);
+      }
+      body.append(tr);
+    });
+    table.hidden = false;
+    const okTop = rows[best].name === Object.keys(expected).reduce((a, b) => (expected[a] >= expected[b] ? a : b));
+    const ok = okTop && maxDev < TOLERANCE;
+    state.className = `sc-state ${ok ? "ok" : "no"}`;
+    state.textContent = ok ? `pass · max |Δ| ${maxDev.toExponential(1)}`
+                           : `fail · max |Δ| ${maxDev.toExponential(1)}`;
+    $("scSummary").textContent = ok
+      ? `This page reproduces check_expected.json: top class “${rows[best].name}”, largest per-class deviation ${maxDev.toExponential(2)} (threshold ${TOLERANCE}). Remaining differences come from the browser's JPEG decoder and float32 rounding order, not from the pipeline.`
+      : `Top class ${okTop ? "matches" : "does NOT match"} expected, largest per-class deviation ${maxDev.toExponential(2)}.`;
+    window.__leafSelftest = { ok, maxDev, got, expected, top: rows[best].name };
+  } catch (e) {
+    state.className = "sc-state no";
+    state.textContent = "error";
+    $("scSummary").textContent = `Self-check could not run: ${e.message || e}`;
+    window.__leafSelftest = { ok: false, error: String(e) };
+  } finally {
+    $("btnCheck").disabled = false;
+  }
+  return window.__leafSelftest;
+}
+
+/* --------------------------------------------------------------- wiring */
+btnCam.addEventListener("click", () => (running ? (stopCamera(), setBanner("")) : startCamera()));
+btnPhoto.addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", (ev) => onPickFile(ev.target.files?.[0]));
+$("btnCheck").addEventListener("click", runSelfCheck);
+document.addEventListener("visibilitychange", () => {   // save battery when backgrounded
+  if (document.hidden) cancelSchedule();
+  else if (running) startLoop();
+});
+
+/* Debug/verification hook: self-check result plus the exact QR payload. */
+window.__leafApp = {
+  url: APP_URL,
+  qr: { text: APP_URL, modules: qrMatrix.length, matrix: qrMatrix },
+  selftest: () => window.__leafSelftest,
+  ready: () => !!session,
+};
+
+ensureModel().catch(() => {});
+if (!window.isSecureContext)
+  setBanner("This copy is not on a secure origin, so the camera API is blocked. Use the photo picker.");
+</script>
+</body>
+</html>
