@@ -8,13 +8,11 @@ I reviewed the files in this repository, especially `index.html`, `model_info.js
 
 The Android app works. However, the committed screenshot `Screenshot_leaf_id.jpg` shows the photo-picker fallback, not a live camera stream: the camera button is idle and the source label shows a selected image filename and its dimensions. The screenshot therefore documents the app running on Android and classifying an uploaded photo, but it is not evidence of the live-camera stream itself.
 
-The live-camera implementation is present in `index.html`: `openCamera()` calls `navigator.mediaDevices.getUserMedia()` and prefers the rear-facing camera with `facingMode: "environment"`; the video element uses `playsinline`; and `startCamera()` starts the inference loop. The separate photo-picker fallback uses the same `classify()` and `preprocess()` functions.
+The live-camera implementation is present in [`index.html`](index.html#L466-L500): `openCamera()` calls `navigator.mediaDevices.getUserMedia()` and prefers the rear-facing camera with `facingMode: "environment"`; the video element uses `playsinline`; and `startCamera()` starts the inference loop. The inference loop is at [`index.html`](index.html#L519-L557). The separate photo-picker fallback uses the same `classify()` and `preprocess()` functions.
 
 I do not have an iPhone, so Safari/iOS remains untested. A separate screenshot with the camera actually running would make the live-camera evidence clearer.
 
 ## 2. Does the page give the same result as the notebook?
-
-The repository contains `check_image.jpg` and `check_expected.json`. The page's self-check sends the image through the same `classify()` and `preprocess()` functions used for camera frames and uploaded photos, then compares the resulting probabilities with the expected values.
 
 The self-check runs `check_image.jpg` through the page's normal `classify()` and `preprocess()` path, then compares the result with `check_expected.json`. The committed Android screenshot shows the self-check passing with a maximum absolute difference of approximately `8.1 × 10⁻⁸`, below the page's `1 × 10⁻³` tolerance.
 
@@ -27,20 +25,20 @@ The values displayed by the page and the reference values are:
 | chestnut | `3.5 × 10⁻⁵` | `3.508940 × 10⁻⁵` | `≈ 9.6 × 10⁻¹⁰` |
 | maple | `4.61 × 10⁻⁷` | `4.611038 × 10⁻⁷` | `≈ 1.5 × 10⁻¹¹` |
 
-The page formats very small probabilities in scientific notation and the cherry probability as a percentage; the table above writes all four as probabilities so they can be compared directly. The screenshot is evidence that the deployed page's self-check passed on Android. The remaining caveat is that this screenshot was taken with a selected photo, not with a live camera stream.
+The page formats very small probabilities in scientific notation and the cherry probability as a percentage; the table above writes all four as probabilities so they can be compared directly. The screenshot shows the deployed page's self-check passing on Android (`max |Δ| ≈ 8.1 × 10⁻⁸`). The self-check uses the same classifier and preprocessing code, as shown in [`index.html`](index.html#L600-L627). The remaining caveat is that this screenshot was taken with a selected photo, not with a live camera stream.
 
 ## 3. Does preprocessing match the model?
 
 **Yes. The implementation in `index.html` matches the preprocessing values in `model_info.json` and the notebook's normalization transform.**
 
-The model description specifies:
+The model description in [`model_info.json`](model_info.json) specifies:
 
 - Input size: 96 × 96
 - Classes: apple, cherry, chestnut and maple
 - Mean: `[0.485, 0.456, 0.406]`
 - Standard deviation: `[0.229, 0.224, 0.225]`
 
-In `preprocess()`, the page:
+In [`preprocess()` in `index.html`](index.html#L383-L399), the page:
 
 1. Takes the largest centred square from the source frame.
 2. Resizes that square to 96 × 96 using a canvas.
@@ -61,7 +59,7 @@ The page uses the camera stream locally, draws the selected frame to a canvas an
 
 The browser does still make normal requests to download the page's resources:
 
-- GitHub Pages serves the page itself and same-origin assets: `leaf_model.onnx`, `model_info.json`, `check_image.jpg` (loaded as an image by the self-check), `check_expected.json`, `qrcode.js` and `favicon.svg`.
+- GitHub Pages serves the page and its same-origin assets: `leaf_model.onnx`, `model_info.json`, `check_image.jpg` (loaded as an image by the self-check), `check_expected.json`, `qrcode.js` and `favicon.svg`. The resource names and runtime URL are defined in [`index.html`](index.html#L291-L297), and the model/metadata are loaded in [`index.html`](index.html#L447-L459).
 - The ONNX Runtime Web JavaScript module and WebAssembly runtime are loaded from the jsDelivr CDN at `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/`.
 - The QR encoder is loaded from the local `qrcode.js` file. The QR code is generated in the browser; the page does not use an external QR-image service.
 
@@ -81,4 +79,5 @@ Before the hand-in, the remaining work is:
 - Export those weights to ONNX using the Task 2e export procedure, replace `leaf_model.onnx`, and regenerate `check_expected.json` for the newly exported model.
 - Run the page's self-check again and confirm the maximum per-class difference is below `1 × 10⁻³`.
 - If possible, add a screenshot with the live camera stream running. The existing screenshot is a photo-upload example.
+- Take one additional Android screenshot with the live camera stream running if you want the screenshot itself to prove the live-camera path.
 - Test on iPhone/Safari only if an iPhone becomes available; Android is the device that has been tested.
