@@ -1,6 +1,6 @@
 # Review of the browser leaf classifier
 
-I reviewed the files in this repository, especially `index.html`, `model_info.json`, `check_image.jpg` (via the self-check setup), `check_expected.json` and `README.md`. This is a source-code review. I could not independently operate a physical phone, so I have separated what the code shows from what still needs a real-device test.
+I reviewed the files in this repository, especially `index.html`, `model_info.json`, `check_image.jpg` (via the self-check setup), `check_expected.json` and `README.md`. This is a source-code review supplemented by the Android test and screenshot provided for this hand-in. I did not independently operate the phone, so I distinguish the supplied device evidence from what I verified in the source.
 
 ## 1. Does it run on a phone and classify the live camera?
 
@@ -18,7 +18,7 @@ The self-check runs `check_image.jpg` through the page's normal `classify()` and
 
 The values displayed by the page and the reference values are:
 
-| Class | This page (probability) | `check_expected.json` | Absolute difference |
+| Class | This page (displayed value, rounded) | `check_expected.json` | Absolute difference from self-check |
 |---|---:|---:|---:|
 | apple | `5.39 × 10⁻⁸` | `5.394148 × 10⁻⁸` | `≈ 1 × 10⁻¹²` |
 | cherry | `0.999964` | `0.9999644756` | `≈ 8.1 × 10⁻⁸` |
@@ -78,6 +78,5 @@ Before the hand-in, the remaining work is:
 - Re-run `group_plus_archive_all` with the original group and archive training images, saving the final model weights (the repository does not contain those training datasets or a saved checkpoint).
 - Export those weights to ONNX using the Task 2e export procedure, replace `leaf_model.onnx`, and regenerate `check_expected.json` for the newly exported model.
 - Run the page's self-check again and confirm the maximum per-class difference is below `1 × 10⁻³`.
-- If possible, add a screenshot with the live camera stream running. The existing screenshot is a photo-upload example.
 - Take one additional Android screenshot with the live camera stream running if you want the screenshot itself to prove the live-camera path.
 - Test on iPhone/Safari only if an iPhone becomes available; Android is the device that has been tested.
