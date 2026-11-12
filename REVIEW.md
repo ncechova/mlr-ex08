@@ -4,13 +4,13 @@ I reviewed the files in this repository, especially `index.html`, `model_info.js
 
 ## 1. Does it run on a phone and classify the live camera?
 
-**Code review: the required camera flow is implemented. Physical-device verification: still needed.**
+**Verified on Android. iPhone has not been tested.**
 
-The page requests camera access through `navigator.mediaDevices.getUserMedia()` and prefers the rear-facing camera with `facingMode: "environment"`. It uses a video element with `playsinline`, which is important for Safari on iPhone. The page also has a photo-upload fallback that uses the same classification pipeline.
+The app was opened on an Android phone and successfully classified a leaf using the live camera. The screenshot `Screenshot_leaf_id.jpg` shows the app running and its classification output, so there is now visual evidence for the mobile-camera requirement.
 
-However, I cannot confirm from the repository alone that the deployed page successfully opened the camera and classified a leaf on both Android and iPhone. I also did not find a committed screenshot showing the page running on a phone with a leaf and its probabilities.
+The implementation requests camera access through `navigator.mediaDevices.getUserMedia()` and prefers the rear-facing camera with `facingMode: "environment"`. It uses a video element with `playsinline`, and includes a photo-upload fallback that follows the same classification pipeline.
 
-**What is still needed:** open the public Pages URL on a phone, allow camera access, point it at a leaf, and save a screenshot showing the live image and all four probabilities. Add that screenshot to the repository and link it here. Until then, this requirement should be treated as not fully verified.
+I do not have an iPhone, so I could not test Safari/iOS. The Android result confirms that the live camera workflow works on at least one real mobile device, but it should not be described as verified on both Android and iPhone.
 
 ## 2. Does the page give the same result as the notebook?
 
