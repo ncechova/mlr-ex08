@@ -4,30 +4,30 @@ I reviewed the files in this repository, especially `index.html`, `model_info.js
 
 ## 1. Does it run on a phone and classify the live camera?
 
-**Verified on Android. iPhone has not been tested.**
+**The app has been tested on Android; iPhone/Safari has not been tested.**
 
-The app was opened on an Android phone and successfully classified a leaf using the live camera. The screenshot `Screenshot_leaf_id.jpg` shows the app running and its classification output, so there is now visual evidence for the mobile-camera requirement.
+The Android app works. However, the committed screenshot `Screenshot_leaf_id.jpg` shows the photo-picker fallback, not a live camera stream: the camera button is idle and the source label shows a selected image filename and its dimensions. The screenshot therefore documents the app running on Android and classifying an uploaded photo, but it is not evidence of the live-camera stream itself.
 
-The implementation requests camera access through `navigator.mediaDevices.getUserMedia()` and prefers the rear-facing camera with `facingMode: "environment"`. It uses a video element with `playsinline`, and includes a photo-upload fallback that follows the same classification pipeline.
+The live-camera implementation is present in `index.html`: `openCamera()` calls `navigator.mediaDevices.getUserMedia()` and prefers the rear-facing camera with `facingMode: "environment"`; the video element uses `playsinline`; and `startCamera()` starts the inference loop. The separate photo-picker fallback uses the same `classify()` and `preprocess()` functions.
 
-I do not have an iPhone, so I could not test Safari/iOS. The Android result confirms that the live camera workflow works on at least one real mobile device, but it should not be described as verified on both Android and iPhone.
+I do not have an iPhone, so Safari/iOS remains untested. A separate screenshot with the camera actually running would make the live-camera evidence clearer.
 
 ## 2. Does the page give the same result as the notebook?
 
 The repository contains `check_image.jpg` and `check_expected.json`. The page's self-check sends the image through the same `classify()` and `preprocess()` functions used for camera frames and uploaded photos, then compares the resulting probabilities with the expected values.
 
-The expected values in `check_expected.json` are:
+The self-check runs `check_image.jpg` through the page's normal `classify()` and `preprocess()` path, then compares the result with `check_expected.json`. The committed Android screenshot shows the self-check passing with a maximum absolute difference of approximately `8.1 × 10⁻⁸`, below the page's `1 × 10⁻³` tolerance.
 
-| Class | Expected probability |
-|---|---:|
-| Apple | 0.0000000539415 |
-| Cherry | 0.9999644756 |
-| Chestnut | 0.0000350894 |
-| Maple | 0.0000004611 |
+The values displayed by the page and the reference values are:
 
-The README records a reference browser run with a maximum difference of approximately `8.1 × 10⁻⁸`, which is comfortably below the stated `1 × 10⁻³` tolerance. That is consistent with agreement to at least three decimal places.
+| Class | This page (probability) | `check_expected.json` | Absolute difference |
+|---|---:|---:|---:|
+| apple | `5.39 × 10⁻⁸` | `5.394148 × 10⁻⁸` | `≈ 1 × 10⁻¹²` |
+| cherry | `0.999964` | `0.9999644756` | `≈ 8.1 × 10⁻⁸` |
+| chestnut | `3.5 × 10⁻⁵` | `3.508940 × 10⁻⁵` | `≈ 9.6 × 10⁻¹⁰` |
+| maple | `4.61 × 10⁻⁷` | `4.611038 × 10⁻⁷` | `≈ 1.5 × 10⁻¹¹` |
 
-I verified that the self-check is wired to the same inference path and that the expected-value file is present. I did not rerun the deployed page in a browser during this review, so the README's measured browser result should be confirmed once more after the final model export.
+The page formats very small probabilities in scientific notation and the cherry probability as a percentage; the table above writes all four as probabilities so they can be compared directly. The screenshot is evidence that the deployed page's self-check passed on Android. The remaining caveat is that this screenshot was taken with a selected photo, not with a live camera stream.
 
 ## 3. Does preprocessing match the model?
 
@@ -61,19 +61,24 @@ The page uses the camera stream locally, draws the selected frame to a canvas an
 
 The browser does still make normal requests to download the page's resources:
 
-- GitHub Pages serves the page and the repository files, including `leaf_model.onnx`, `model_info.json`, `check_image.jpg` and `check_expected.json`.
+- GitHub Pages serves the page itself and same-origin assets: `leaf_model.onnx`, `model_info.json`, `check_image.jpg` (loaded as an image by the self-check), `check_expected.json`, `qrcode.js` and `favicon.svg`.
 - The ONNX Runtime Web JavaScript module and WebAssembly runtime are loaded from the jsDelivr CDN at `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/`.
-- The QR encoder is loaded from the local `qrcode.js` file in the repository. The QR code is generated in the browser; the page does not use an external QR-image service.
+- The QR encoder is loaded from the local `qrcode.js` file. The QR code is generated in the browser; the page does not use an external QR-image service.
+
+The inspected page code contains no `XMLHttpRequest`, `sendBeacon`, WebSocket, or POST request for camera frames or selected photos. The browser must still download the app and model assets, and the hosting/CDN services can see normal request metadata.
 
 Therefore, the image itself stays on the device during classification, but the hosting and CDN services receive ordinary asset requests and may see request metadata such as the IP address and requested file. It would be more accurate to say **"images are not uploaded; inference runs locally"** than to say that the phone makes no network requests at all.
 
 ## Fixes and remaining checks
 
-I did not find a preprocessing or image-upload issue that required a code change during this review. The main outstanding item is evidence from a real phone.
+The preprocessing contract matches the notebook and `model_info.json`, and the self-check code uses the same inference path as the app. The screenshot documents Android use and a passing self-check, but it shows photo upload rather than a live camera stream.
 
-Before submitting, I would:
+The main outstanding requirement is model deployment. The current `leaf_model.onnx` is the Task 2 export, not a demonstrated export of `group_plus_archive_all`. The Task 4 results file stores metrics and per-epoch histories, not trained weights, and `task4.py` does not save a checkpoint. Therefore, the selected Task 4 model is not yet running on the live page.
 
-- Test the deployed page on at least one phone, preferably both Android and iPhone.
-- Add a screenshot showing a live leaf classification.
-- Run the model self-check on the deployed page after the final ONNX export and confirm that every probability differs from the expected value by less than 0.001.
-- Confirm that `leaf_model.onnx` contains the weights from the selected `group_plus_archive_all` checkpoint. The architecture is compatible, but the report's best training result only applies to the browser app if those weights were actually exported and committed.
+Before the hand-in, the remaining work is:
+
+- Re-run `group_plus_archive_all` with the original group and archive training images, saving the final model weights (the repository does not contain those training datasets or a saved checkpoint).
+- Export those weights to ONNX using the Task 2e export procedure, replace `leaf_model.onnx`, and regenerate `check_expected.json` for the newly exported model.
+- Run the page's self-check again and confirm the maximum per-class difference is below `1 × 10⁻³`.
+- If possible, add a screenshot with the live camera stream running. The existing screenshot is a photo-upload example.
+- Test on iPhone/Safari only if an iPhone becomes available; Android is the device that has been tested.
