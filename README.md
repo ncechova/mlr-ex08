@@ -125,6 +125,9 @@ same 29×29 modules, same 4-module quiet zone.
 | `check_expected.json` | reference probabilities for that image |
 | `favicon.svg` | icon |
 | `.nojekyll` | tells GitHub Pages to serve the files as they are (no Jekyll step) |
+| `REPORT.md` | exercise Task 4 — which change brought what, and which model goes on the phone |
+| `task4.py` | the experiment runner behind that report (15 variants, three validation sets) |
+| `task4_results.json` | every measured run behind the report, per epoch |
 
 ## Running it locally
 
