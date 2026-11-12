@@ -4,7 +4,7 @@
 
 The best result in this experiment was `group_plus_archive_all`: a fine-tuned MobileNetV3-small trained on our photographs and last year's archive, with colour augmentation, AdamW, label smoothing and a cosine learning-rate schedule for 30 epochs.
 
-It reached **74.6%** on the camera-like validation set and **90.8%** on the archive validation set. The Task 3d baseline reached 37.1% and 39.4% on those sets, respectively. I would choose this model for the phone, but I would still like to test it on a completely new set of real phone photographs. The camera-like set is useful, but it is made from the same 29 validation photographs used elsewhere in the experiment.
+It reached **74.6%** on the camera-like validation set and **90.8%** on the archive validation set. The Task 3d baseline reached 37.1% and 39.4% on those sets, respectively. This makes `group_plus_archive_all` the strongest Task 4 candidate for the phone. **It is not the model currently running on the Pages site:** `leaf_model.onnx` is still the Task 2 export. The Task 4 results file contains metrics and validation histories, not saved model weights, so the selected variant still has to be trained/exported before it can replace the live model. The camera-like set is also only a proxy, because it is made from the same 29 validation photographs.
 
 ## Experimental setup
 
@@ -18,7 +18,9 @@ I compared 15 variants in 33 runs. The important variants were repeated with see
 | `camera` | Eight fixed-seed crops/rotations/colour variations of each of the 29 validation photographs | 232 |
 | `archive` | Last year's validation photographs, taken by other students using other phones | 120 |
 
-The archive training set contains 700 images. Together with our 107 training images, the combined training set contains 807 images. The camera-like set was generated once with a fixed seed, before the model comparisons, so every variant was evaluated on the same images.
+The archive training set contains 700 images. Together with our 107 training images, the combined training set contains 807 images. The archive data came from [the course archive ZIP](https://raw.githubusercontent.com/tomasvicar/MLR-public/master/exercises/data/ex08_leaves_images.zip) (SHA-256: `f7bbaa9a…cf53`). The camera-like set was generated once with a fixed seed, before the model comparisons, so every variant was evaluated on the same images.
+
+**The results are noisy, especially on the original validation set.** Across the nine variants repeated with three seeds, the `val` accuracy spread ranged from 6.9 to 20.7 percentage points; the largest spread was for `leafnetbn_dropout`. On the 232-image camera-like set, the seed spread ranged from 2.2 to 9.5 percentage points. One image changes the `val` score by about 3.4 points and the camera-like score by about 0.43 points. I therefore treat small changes as inconclusive, and the six single-seed variants as preliminary.
 
 All runs were measured on a CPU using 8 threads. The full set of 33 runs took about an hour. Individual runs took between roughly 17 and 596 seconds, depending mainly on the size of the training set and the number of epochs.
 
@@ -46,7 +48,7 @@ The table shows the mean of the runs for each variant. Values in brackets are th
 
 ## What made the biggest difference
 
-**Transfer learning helped.** Fine-tuning MobileNetV3-small improved the camera-like accuracy from 37.1% to 55.0%, an increase of 17.9 percentage points. This was a much better starting point than training the small network from scratch.
+**Transfer learning helped.** Fine-tuning MobileNetV3-small improved the camera-like accuracy from 37.1% to 55.0%, an increase of **18.0 percentage points** (rounded to one decimal place, as in the results table). This was a much better starting point than training the small network from scratch.
 
 **Colour augmentation also helped.** Adding ColorJitter to the small network increased camera-like accuracy from 37.1% to 51.3%. This suggests that changes in lighting and colour are important for this task. Removing the geometric augmentation, on the other hand, did not make the model better on the camera-like or archive sets.
 
@@ -73,10 +75,10 @@ For the selected `group_plus_archive_all` variant, the following values are aver
 
 | Class | Camera-like accuracy (%) | Archive accuracy (%) |
 |---|---:|---:|
-| Apple | 7083.3 | 8556.7 |
-| Cherry | 5730.0 | 8223.3 |
-| Chestnut | 6146.7 | 10000.0 |
-| Maple | 9906.7 | 9556.7 |
+| apple | 70.8 | 85.6 |
+| cherry | 57.3 | 82.2 |
+| chestnut | 61.5 | 100.0 |
+| maple | 99.1 | 95.6 |
 
 The most frequent error was confusing apple and cherry. Across the three camera-like runs, cherry was predicted as apple 79 times and apple as cherry 55 times. On the archive set, these two directions accounted for 29 mistakes across the three runs. Maple was classified very reliably, while cherry was the weakest class on the camera-like images.
 
@@ -96,9 +98,11 @@ The most useful next step would be to collect a separate test set using the actu
 
 ## Model I would use on the phone
 
-I would choose **`group_plus_archive_all`**. It had the best camera-like and archive results, and its camera-like score was similar across the three seeds (74–76%). Its MobileNetV3-small architecture is compatible with the browser app's existing input contract: 96 × 96 RGB input, the same channel-wise mean and standard deviation, and four output classes.
+I would choose **`group_plus_archive_all` as the next model to deploy**. It had the best mean camera-like and archive results, and its camera-like scores across the three seeds were 73.7–75.9%. Its MobileNetV3-small architecture is compatible with the browser app's existing input contract: 96 × 96 RGB input, the same channel-wise mean and standard deviation, and four output classes.
 
-The selected model still needs to be exported from the corresponding trained checkpoint and checked against `check_image.jpg` and `check_expected.json`. If the exported ONNX file uses this checkpoint, the browser preprocessing and page code should not need to change; only the model weights need to be replaced. I would then test the updated model on a real phone before treating it as the final version.
+However, the live page has **not** been updated to this variant. The current `leaf_model.onnx` is still the Task 2 model. `task4_results.json` stores accuracy, per-class results and training histories, but no `state_dict` or checkpoint; `task4.py` also does not currently save the trained weights. The `group_plus_archive_all` checkpoint therefore cannot be exported from the files currently in the repository. It must be regenerated by rerunning that training variant with the original group and archive training images, saving its weights, and then exporting those weights using the Task 2e ONNX export step.
+
+After export, replace `leaf_model.onnx` and regenerate `check_expected.json` for the new model (the old expected probabilities belong to the Task 2 model). Then run the browser self-check again. The preprocessing and page code should not need to change, but the new model must pass its own updated self-check before it is described as deployed.
 
 ## Reproducing the experiment
 
@@ -110,4 +114,4 @@ python task4.py --data <data-folder> --out task4_results.json
 
 The data folder should contain `leaves/{train,val}` and, for the archive experiments, `leaves_archive/{train,val}`. The archive ZIP has a top-level folder also named `leaves`, so it should be extracted separately and renamed before running the experiment.
 
-The script supports `--only name` to run selected variants and `--force` to rerun completed experiments. The results in this report were measured on CPU with 8 threads. Different hardware or library versions may produce slightly different values.
+The script supports `--only name` (or a comma-separated list of names) to run selected variants, `--force` to rerun completed experiments, and `--quick` for a two-epoch, one-seed smoke test. The results in this report were measured on CPU with 8 threads. Different hardware or library versions may produce slightly different values.
