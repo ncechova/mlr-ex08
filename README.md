@@ -119,10 +119,11 @@ same 29×29 modules, same 4-module quiet zone.
 | `index.html` | the whole app: UI, preprocessing, inference, self-check, QR |
 | `qrcode.js` | vendored QR encoder (unmodified upstream, MIT) |
 | `qr.svg` | the same QR code as a static file, for this README |
-| `leaf_model.onnx` | the trained model |
+| `leaf_model.onnx` | the current Task 2 ONNX model used by the live page (4 classes, 96 × 96 input) |
 | `model_info.json` | class names, input size, mean/std — the preprocessing contract |
 | `check_image.jpg` | verification image (96×96) |
 | `check_expected.json` | reference probabilities for that image |
+| `Screenshot_leaf_id.jpg` | Android screenshot showing the app's photo-upload fallback and self-check result |
 | `favicon.svg` | icon |
 | `.nojekyll` | tells GitHub Pages to serve the files as they are (no Jekyll step) |
 | `REPORT.md` | exercise Task 4 — which change brought what, and which model goes on the phone |
